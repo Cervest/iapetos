@@ -129,16 +129,59 @@
     (f)))
 
 (defn- run-instrumented
-  [{:keys [handler exception-status] :as options} request]
-  (ex/with-exceptions (exception-counter-for options request)
-    (let [start-time (System/nanoTime)
-          response   (safe exception-status #(handler request))
-          delta      (- (System/nanoTime) start-time)]
-      (->> (ensure-response-map response exception-status)
-           (record-metrics! options delta request))
-      (if-not (exception? response)
-        response
-        (throw response)))))
+  ([{:keys [handler exception-status] :as options} request]
+   (ex/with-exceptions (exception-counter-for options request)
+     (let [start-time (System/nanoTime)
+           response   (safe exception-status #(handler request))
+           delta      (- (System/nanoTime) start-time)]
+       (->> (ensure-response-map response exception-status)
+            (record-metrics! options delta request))
+       (if-not (exception? response)
+         response
+         (throw response)))))
+
+  ([{:keys [handler exception-status] :as options} request respond raise]
+   (let [start-time (System/nanoTime)
+         ex-counter (exception-counter-for options request)
+         respond-fn #(let [delta (- (System/nanoTime) start-time)]
+                       (->> (ensure-response-map % exception-status)
+                            (record-metrics! options delta request))
+                       (respond %))
+         raise-fn   #(do (ex/record-exception! ex-counter %)
+                         (raise %))]
+     (try
+       (handler request respond-fn raise-fn)
+       (catch Throwable t
+         (ex/record-exception! ex-counter t)
+         (raise t))))))
+
+(defn- run-expose
+  ([{:keys [path on-request registry handler] :as _options}
+    {:keys [request-method uri] :as request}]
+   (if (= uri path)
+     (if (= request-method :get)
+       (do
+         (on-request registry)
+         (metrics-response registry))
+       {:status 405})
+     (handler request)))
+
+  ([{:keys [path on-request registry handler] :as _options}
+    {:keys [request-method uri] :as request}
+    respond
+    raise]
+   (if (= uri path)
+     (if (= request-method :get)
+       (do
+         (on-request registry)
+         (respond (metrics-response registry)))
+       (respond {:status 405}))
+     (handler request respond raise))))
+
+(defn ring-fn [f options]
+  (fn
+    ([request] (f options request))
+    ([request respond raise] (f options request respond raise))))
 
 (defn wrap-instrumentation
   "Wrap the given Ring handler to write metrics to the given registry:
@@ -170,7 +213,7 @@
                        :label-fn label-fn
                        :registry registry
                        :handler  handler)]
-    #(run-instrumented options %)))
+    (ring-fn run-instrumented options)))
 
 ;; ### Metrics Endpoint
 
@@ -182,16 +225,15 @@
    the Prometheus scraper as a trigger for metrics collection."
   [handler registry
    & [{:keys [path on-request]
-       :or {path       "/metrics"
-            on-request identity}}]]
-  (fn [{:keys [request-method uri] :as request}]
-    (if (= uri path)
-      (if (= request-method :get)
-        (do
-          (on-request registry)
-          (metrics-response registry))
-        {:status 405})
-      (handler request))))
+       :or  {path       "/metrics"
+             on-request identity}
+       :as options}]]
+  (let [options (assoc options
+                       :path path
+                       :on-request on-request
+                       :registry registry
+                       :handler  handler)]
+    (ring-fn run-expose options)))
 
 ;; ### Compound Middleware
 
