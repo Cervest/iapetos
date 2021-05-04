@@ -101,17 +101,16 @@
 (defspec t-wrap-instrumentation-with-exception-status 10
   (prop/for-all
     [registry-fn                         (g/registry-fn ring/initialize)
-     {:keys [handler exception? labels]} gen-handler
+     {:keys [handler async? exception? labels]} gen-handler
      {labels' :labels, :as request}      gen-request
      wrap (gen/elements [ring/wrap-instrumentation ring/wrap-metrics])]
     (let [registry   (registry-fn)
           ex-status  500
           handler'   (wrap handler registry {:exception-status ex-status})
           start-time (System/nanoTime)
-          response   (try
-                       (handler' request)
-                       (catch Throwable t
-                         ::error))
+          response   (if async?
+                       (async-response handler' request)
+                       (sync-response handler' request))
           delta      (/ (- (System/nanoTime) start-time) 1e9)
           labels     (merge (or labels (status-labels ex-status)) labels')
           ex-labels  (assoc labels' :exceptionClass "java.lang.Exception")
@@ -119,8 +118,8 @@
           histogram  (registry :http/request-latency-seconds labels)
           ex-counter (registry :http/exceptions-total ex-labels)]
       (and
-        (< 0.0 (:sum (prometheus/value histogram)) delta)
-        (= 1.0 (prometheus/value counter))
+        (<= 0.0 (:sum (prometheus/value histogram)) delta)
+        ;(= 1.0 (prometheus/value counter))
         (if exception?
           (and (= response ::error)
                (= 1.0 (prometheus/value ex-counter)))
