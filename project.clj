@@ -1,4 +1,4 @@
-(defproject clj-commons/iapetos "0.1.11"
+(defproject clj-commons/iapetos "0.1.11b"
   :description "A Clojure Prometheus Client"
   :url "https://github.com/clj-commons/iapetos"
   :license {:name "MIT License"
@@ -32,4 +32,8 @@
                              [riddley "0.1.15"]]}}
   :aliases {"codox" ["with-profile" "+codox" "codox"]
             "codecov" ["with-profile" "+coverage" "cloverage" "--codecov"]}
-  :pedantic? :abort)
+  :deploy-repositories {"releases" {:url           "s3p://cervest-internal-jars/releases"
+                                    :sign-releases false
+                                    :no-auth       true}}
+  :lein-release {:deploy-via "releases"}
+  :plugins [[s3-wagon-private "1.3.4"]])
