@@ -1,4 +1,4 @@
-(defproject clj-commons/iapetos "0.1.11b"
+(defproject earth.cervest/iapetos "0.1.12"
   :description "A Clojure Prometheus Client"
   :url "https://github.com/clj-commons/iapetos"
   :license {:name "MIT License"
