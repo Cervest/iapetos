@@ -143,12 +143,14 @@
   ([{:keys [handler exception-status] :as options} request respond raise]
    (let [start-time (System/nanoTime)
          ex-counter (exception-counter-for options request)
-         respond-fn #(let [delta (- (System/nanoTime) start-time)]
-                       (->> (ensure-response-map % exception-status)
-                            (record-metrics! options delta request))
-                       (respond %))
-         raise-fn   #(do (ex/record-exception! ex-counter %)
-                         (raise %))]
+         respond-fn (fn [response]
+                      (let [delta (- (System/nanoTime) start-time)]
+                        (->> (ensure-response-map response exception-status)
+                             (record-metrics! options delta request))
+                        (respond response)))
+         raise-fn   (fn [e]
+                      (ex/record-exception! ex-counter %)
+                      (raise e))]
      (try
        (handler request respond-fn raise-fn)
        (catch Throwable t
